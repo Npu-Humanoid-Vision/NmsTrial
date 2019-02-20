@@ -27,7 +27,7 @@ inline bool JudgeRectBySideLine(cv::Rect t_rect, double k, double b);
 
 
 // NMS threshold
-#define NMS_THRE 0.5
+#define NMS_THRE 0.9
 
 // define rect with scores
 struct MyRect {
@@ -68,9 +68,9 @@ int main(int argc, char const *argv[]) {
 
     // thresholds for ball
     cv::Mat thre_result;
-    int min_thre = 144;
+    int min_thre = 0;
     int max_thre = 255;
-    int integral_min = 56;
+    int integral_min = 100;
     
     // thresholds for glass
     int h_min = 0;
@@ -102,6 +102,8 @@ int main(int argc, char const *argv[]) {
         cv::flip(frame, frame, -1);
         cv::resize(frame, frame, cv::Size(320, 240));
 #endif
+        cv::resize(frame, frame, cv::Size(320, 240));
+
         // blur 
         cv::GaussianBlur(frame, frame, cv::Size(5, 5), 0.);
 
@@ -129,20 +131,27 @@ int main(int argc, char const *argv[]) {
         
         nms_result = frame.clone();
 
-        std::vector<MyRect> for_nms(sld_result.size());
+        std::vector<MyRect> for_nms;
         for (auto i = 0; i < sld_result.size(); i++) {
             // get scores
             cv::Mat t = frame(sld_result[i]).clone();
             cv::Mat hog_vec_in_mat = GetHogVec(t);
-            for_nms[i].scores = tester.predict(hog_vec_in_mat);
-            cout<<for_nms[i].scores<<endl;
-            // get rect
-            for_nms[i].rect = sld_result[i];
-            cv::rectangle(frame, sld_result[i], cv::Scalar(0, 255, 0));
+            float t_scores = tester.predict(hog_vec_in_mat);
+            // cout<<t_scores<<endl;
+            if (t_scores > 0) { 
+                // cout<<t_scores<<endl;
+                MyRect t_rect;
+                t_rect.rect = sld_result[i];
+                t_rect.scores = t_scores;
+                for_nms.push_back(t_rect);
+
+                cv::rectangle(frame, sld_result[i], cv::Scalar(0, 255, 0));
+            }
         }
         Nms(for_nms, NMS_THRE);
         for (auto i = for_nms.begin(); i != for_nms.end(); i++) {
             if (i->valid) {
+                cout<<"???"<<endl;
                 cv::rectangle(nms_result, i->rect, cv::Scalar(0, 255, 0));
             }
         }
@@ -310,12 +319,12 @@ inline bool JudgeRectBySideLine(cv::Rect t_rect, double k, double b) {
 
 // for MyRect sort with scores
 bool RectSort(MyRect r_1, MyRect r_2) {
-    return r_1.scores > r_2.scores;
+    return r_1.scores >= r_2.scores;
 }
 
 // get iou
 inline double GetIou(MyRect r_1, MyRect r_2) {
-    cv::Rect inter = r_1.rect | r_2.rect;
+    cv::Rect inter = r_1.rect & r_2.rect;
     return 1.0*inter.area()/(r_1.rect.area()+r_2.rect.area()-inter.area());
 }
 
@@ -323,9 +332,14 @@ inline double GetIou(MyRect r_1, MyRect r_2) {
 inline void Nms(std::vector<MyRect>& input_rects, double nms_thre) {
     sort(input_rects.begin(), input_rects.end(), RectSort);
 
-    for (auto i = input_rects.begin(); i != input_rects.end(); i++) {
+    for (auto i = input_rects.begin(); i != input_rects.end() && i->valid; i++) {
+        // // cout<<i->scores<<endl;
+        // if (i->valid) {
+        //     cout<<233<<endl;
+        // }
         for (auto j = input_rects.begin(); j != input_rects.end(); j++) {
-            if (GetIou(*i, *j) > nms_thre) {
+            // cout<<GetIou(*i, *j)<<endl;
+            if (GetIou(*i, *j) < nms_thre) {
                 j->valid = false;
             }   
         }
