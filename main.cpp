@@ -6,12 +6,15 @@ using namespace cv;
 #define POS_LABLE 1
 #define NEG_LABLE 0
 
+// #define RUN_ON_DARWIN
+
 // VideoCapture打开的东西(string& filename/webcam index)
 // #define CP_OPEN "/media/alex/Data/baseRelate/pic_data/frame%04d.jpg"
 #define CP_OPEN "../../BackUpSource/Ball/Train/Raw/%d.jpg"
 // #define CP_OPEN 1
 
-#define MODEL_NAME "../SvmTrain/ball_rbf_auto.xml"
+// 注意一定要是回归模型
+#define MODEL_NAME "../SvmTrain/nu_svr_linear.xml"
 
 #define IMG_COLS 32
 #define IMG_ROWS 32
@@ -55,7 +58,7 @@ int main(int argc, char const *argv[]) {
     cv::Mat frame;
     cv::Mat integral_frame;
     cv::Mat used_channel;
-    cv::Mat probable_pos;
+    cv::Mat nms_result;
     int used_channel_flag = 1;
 
     cv::Mat s_mask;
@@ -65,14 +68,14 @@ int main(int argc, char const *argv[]) {
 
     // thresholds for ball
     cv::Mat thre_result;
-    int min_thre = 0;
+    int min_thre = 144;
     int max_thre = 255;
-    int integral_min = 0;
+    int integral_min = 56;
     
     // thresholds for glass
     int h_min = 0;
-    int h_max = 255;
-    int s_min = 0;
+    int h_max = 256;
+    int s_min = 15;
     
     // fps variables
     double begin;
@@ -95,7 +98,7 @@ int main(int argc, char const *argv[]) {
             continue;
         }
         
-#if CV_MAJOR_VERSION < 3
+#ifdef RUN_ON_DARWIN 
         cv::flip(frame, frame, -1);
         cv::resize(frame, frame, cv::Size(320, 240));
 #endif
@@ -124,19 +127,35 @@ int main(int argc, char const *argv[]) {
         std::vector<cv::Rect> sld_result;
         Slide(integral_frame, sld_result, integral_min/100.0, k, b);
         
-        probable_pos = frame.clone();
-        
+        nms_result = frame.clone();
 
+        std::vector<MyRect> for_nms(sld_result.size());
+        for (auto i = 0; i < sld_result.size(); i++) {
+            // get scores
+            cv::Mat t = frame(sld_result[i]).clone();
+            cv::Mat hog_vec_in_mat = GetHogVec(t);
+            for_nms[i].scores = tester.predict(hog_vec_in_mat);
+            cout<<for_nms[i].scores<<endl;
+            // get rect
+            for_nms[i].rect = sld_result[i];
+            cv::rectangle(frame, sld_result[i], cv::Scalar(0, 255, 0));
+        }
+        Nms(for_nms, NMS_THRE);
+        for (auto i = for_nms.begin(); i != for_nms.end(); i++) {
+            if (i->valid) {
+                cv::rectangle(nms_result, i->rect, cv::Scalar(0, 255, 0));
+            }
+        }
 
         cv::line(frame, cv::Point(0., b), cv::Point(1.0*frame.cols, k*frame.cols+b), cv::Scalar(0, 0, 255), 2);
         cout<<"fps: "<<1.0/(((double)getTickCount() - begin)/getTickFrequency())<<endl;
 
-        cv::imshow("living", frame);
+        cv::imshow("sld_raw_result", frame);
         cv::imshow("ball_thre", thre_result);
         cv::imshow("glass_thre", glass_binary);
         // cv::imshow("integral", integral_frame);
-        cv::imshow("sld_result", probable_pos);
-        char key = cv::waitKey(1);
+        cv::imshow("nms_result", nms_result);
+        char key = cv::waitKey(100);
         if (key == 'q') {
             break;
         }
@@ -205,7 +224,7 @@ inline void Slide(cv::Mat& integral_image, std::vector<cv::Rect>& result, double
 
 inline cv::Mat GetHogVec(cv::Mat& ROI) {
     cv::resize(ROI, ROI, cv::Size(IMG_COLS, IMG_ROWS));
-    cv::HOGDescriptor hog_des(Size(IMG_COLS, IMG_ROWS), Size(16,16), Size(8,8), Size(8,8), 9);
+    cv::HOGDescriptor hog_des(Size(IMG_COLS, IMG_ROWS), Size(16,16), Size(2,2), Size(8,8), 12);
     std::vector<float> hog_vec;
     hog_des.compute(ROI, hog_vec);
 
